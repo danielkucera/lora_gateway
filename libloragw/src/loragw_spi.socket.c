@@ -28,9 +28,10 @@
 	#define CHECK_NULL(a)				if(a==NULL){return LGW_SPI_ERROR;}
 #endif
 
-#define READ_CMD 0x01
-#define WRITE_CMD 0x02
-#define BURST_WRITE_CMD 0x03
+#define READ_CMD	0x01
+#define WRITE_CMD	0x02
+#define BURST_WRITE_CMD	0x03
+#define BURST_READ_CMD	0x03
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE CONSTANTS ---------------------------------------------------- */
@@ -41,30 +42,31 @@
 /* -------------------------------------------------------------------------- */
 /* --- PUBLIC FUNCTIONS DEFINITION ------------------------------------------ */
 
+int spi_sock = -1;
+
 /* SPI initialization and configuration */
 int lgw_spi_open(void **spi_target_ptr) {
-	int sock;
 	struct sockaddr_un server;
 
 	DEBUG_MSG("lgw_spi_open\n");
 	/* check input variables */
 	CHECK_NULL(spi_target_ptr); /* cannot be null, must point on a void pointer (*spi_target_ptr can be null) */
 	
-	sock = socket(AF_UNIX, SOCK_STREAM, 0);
-	if (sock < 0) {
+	spi_sock = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (spi_sock < 0) {
 		DEBUG_MSG("ERROR opening stream socket\n");
 		return LGW_SPI_ERROR;
 	}
 	server.sun_family = AF_UNIX;
 	strcpy(server.sun_path, "/var/run/lora.sock");
 
-	if (connect(sock, (struct sockaddr *) &server, sizeof(struct sockaddr_un)) < 0) {
-		close(sock);
+	if (connect(spi_sock, (struct sockaddr *) &server, sizeof(struct sockaddr_un)) < 0) {
+		close(spi_sock);
 		DEBUG_MSG("ERROR connecting stream socket");
 		return LGW_SPI_ERROR;
 	}
 
-	*spi_target_ptr = (void *)&sock;
+	*spi_target_ptr = (void *)&spi_sock; // we cannot left this ptr empty
 
 	return LGW_SPI_SUCCESS;
 }
@@ -74,12 +76,8 @@ int lgw_spi_open(void **spi_target_ptr) {
 /* SPI release */
 int lgw_spi_close(void *spi_target) {
 	DEBUG_MSG("lgw_spi_close\n");
-	int sock = *(int *)spi_target;
 	
-	/* check input variables */
-	CHECK_NULL(spi_target);
-
-	close(sock);
+	close(spi_sock);
 	
 	/* close return no status, assume success (0_o) */
 	return LGW_SPI_SUCCESS;
@@ -87,34 +85,35 @@ int lgw_spi_close(void *spi_target) {
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-int handle_cmd(int sock, char* out_buf, char* in_buf, int len){
-	DEBUG_PRINTF("Info: handling SPI on socket %d\n", sock);
+int handle_cmd(uint8_t *out_buf, uint8_t *in_buf, int len){
+	DEBUG_PRINTF("Info: handling SPI on socket %d\n", spi_sock);
 	int ret;
 
-	if (write(sock, out_buf, len) < len){
+	if (write(spi_sock, out_buf, len) < len){
 		DEBUG_MSG("ERROR: SPI CMD SEND FAILURE\n");
 		return LGW_SPI_ERROR;
 	}
-	if ((ret = read(sock, in_buf, len)) != len){
+	if ((ret = read(spi_sock, in_buf, len)) != len){
 		DEBUG_PRINTF("ERROR: SPI CMD short response %d expected %d\n", ret, len);
 		return LGW_SPI_ERROR;
-	} else {
-		DEBUG_MSG("Note: SPI cmd success\n");
-		return LGW_SPI_SUCCESS;
 	}
+	if (in_buf[0] != 0xff){
+		DEBUG_PRINTF("ERROR: SPI CMD failed with errno %x\n", in_buf[0]);
+		return LGW_SPI_ERROR;
+	}
+
+	DEBUG_MSG("Note: SPI cmd success\n");
+	return LGW_SPI_SUCCESS;
 }
 
 /* Simple write */
-/* transaction time: .6 to 1 ms typically */
 int lgw_spi_w(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, uint8_t address, uint8_t data) {
 	DEBUG_MSG("lgw_spi_w\n");
-	int sock = *(int *)spi_target;
 	uint8_t in_buf[5];
 	uint8_t out_buf[5];
 	uint8_t command_size;
 	
 	/* check input variables */
-	CHECK_NULL(spi_target);
 	if ((address & 0x80) != 0) {
 		DEBUG_MSG("WARNING: SPI address > 127\n");
 	}
@@ -124,33 +123,29 @@ int lgw_spi_w(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, ui
         out_buf[2] = spi_mux_target;
         out_buf[3] = WRITE_ACCESS | (address & 0x7F);
         out_buf[4] = data;
-        command_size = 3;
+        command_size = 5;
     } else {
         out_buf[2] = WRITE_ACCESS | (address & 0x7F);
         out_buf[3] = data;
-        command_size = 2;
+        command_size = 4;
     }
 	
 	out_buf[0] = WRITE_CMD;
 	out_buf[1] = command_size;
 
-	return handle_cmd(sock, out_buf, in_buf, command_size + 2);
+	return handle_cmd(out_buf, in_buf, command_size);
 }
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 /* Simple read (using Transfer function) */
-/* transaction time: 1.1 to 2 ms typically */
 int lgw_spi_r(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, uint8_t address, uint8_t *data) {
 	DEBUG_MSG("lgw_spi_r\n");
-	int sock = *(int *)spi_target;
 	uint8_t in_buf[5];
 	uint8_t out_buf[5];
 	uint8_t command_size;
-	DEBUG_PRINTF("socket %d\n", sock);
 	
 	/* check input variables */
-	CHECK_NULL(spi_target);
 	if ((address & 0x80) != 0) {
 		DEBUG_MSG("WARNING: SPI address > 127\n");
 	}
@@ -161,18 +156,18 @@ int lgw_spi_r(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, ui
 		out_buf[2] = spi_mux_target;
 		out_buf[3] = READ_ACCESS | (address & 0x7F);
 		out_buf[4] = 0x00;
-		command_size = 3;
+		command_size = 5;
 	} else {
 		out_buf[2] = READ_ACCESS | (address & 0x7F);
 		out_buf[3] = 0x00;
-		command_size = 2;
+		command_size = 4;
 	}
 
 	out_buf[0] = READ_CMD;
 	out_buf[1] = command_size;
 
-	int ret = handle_cmd(sock, out_buf, in_buf, command_size + 2);
-	*data = in_buf[1];
+	int ret = handle_cmd(out_buf, in_buf, command_size);
+	*data = in_buf[3];
 
 	return ret;
 }
@@ -180,18 +175,16 @@ int lgw_spi_r(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, ui
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 /* Burst (multiple-byte) write */
-/* transaction time: 3.7ms for 2500 data bytes @6MHz, 1kB chunks */
-/* transaction time: 0.5ms for 16 data bytes @6MHz, 1kB chunks */
 int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, uint8_t address, uint8_t *data, uint16_t size) {
 	DEBUG_MSG("lgw_spi_wb\n");
-	int sock = *(int *)spi_target;
-	uint8_t command[2];
+	uint8_t command[5];
 	uint8_t command_size;
 	uint8_t *out_buf = NULL;
 	int size_to_do, buf_size, chunk_size, offset;
+	int i;
+	int ret;
 	
 	/* check input parameters */
-	CHECK_NULL(spi_target);
 	if ((address & 0x80) != 0) {
 		DEBUG_MSG("WARNING: SPI address > 127\n");
 	}
@@ -200,7 +193,7 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 		DEBUG_MSG("ERROR: BURST OF NULL LENGTH\n");
 		return LGW_SPI_ERROR;
 	}
-	
+
     /* prepare command bytes */
     if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
         command[2] = spi_mux_target;
@@ -210,6 +203,9 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
         command[2] = WRITE_ACCESS | (address & 0x7F);
         command_size = 3;
     }
+	command[0] = BURST_WRITE_CMD;
+	command[1] = command_size;
+
 	size_to_do = size + command_size; /* add a byte for the address */
 	
 	/* allocate data buffer */
@@ -220,35 +216,44 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 		return LGW_SPI_ERROR;
 	}
 
-	out_buf[0] = BURST_WRITE_CMD;
-	out_buf[1] = command_size;
+	uint8_t in_buf[size_to_do];
 
-	char in_buf[command_size];
-	int ret = handle_cmd(sock, out_buf, in_buf, command_size + 2);
-	
+        for (i=0; size_to_do > 0; ++i) {
+                chunk_size = (size_to_do < LGW_BURST_CHUNK) ? size_to_do : LGW_BURST_CHUNK;
+                if (i == 0) {
+                        /* first chunk, need to prepend the address */
+                        memcpy(out_buf, command, command_size);
+                        memcpy(out_buf+command_size, data, chunk_size-command_size);
+                } else {
+                        /* following chunks, just copy the data */
+                        offset = (i * LGW_BURST_CHUNK) - command_size;
+                        memcpy(out_buf, data + offset, chunk_size);
+                }
+		ret = handle_cmd(out_buf, in_buf, chunk_size);
+		if (ret != LGW_SPI_SUCCESS){
+			return ret;
+		}
+                size_to_do -= chunk_size; /* subtract the quantity of data already transferred */
+        }
+
 	/* deallocate data buffer */
 	free(out_buf);
 	
-	/* determine return code (only the last FastWrite is checked) */
 	return ret;
 }
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
-/* Burst (multiple-byte) read (using FastWrite & FastRead functions) */
-/* transaction time: 7-12ms for 2500 data bytes @6MHz, 1kB chunks */
-/* transaction time: 2ms for 16 data bytes @6MHz, 1kB chunks */
+/* Burst (multiple-byte) read */
 int lgw_spi_rb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, uint8_t address, uint8_t *data, uint16_t size) {
 	DEBUG_MSG("lgw_spi_rb\n");
-	int sock = *(int *)spi_target;
-	uint8_t command[2];
-    uint8_t command_size;
+	uint8_t command[4];
+	uint8_t command_size;
 	int size_to_do, chunk_size, offset;
-	int a=0, b=0, c=0, d=0;
 	int i;
+	int ret;
 	
 	/* check input parameters */
-	CHECK_NULL(spi_target);
 	if ((address & 0x80) != 0) {
 		DEBUG_MSG("WARNING: SPI address > 127\n");
 	}
@@ -260,23 +265,33 @@ int lgw_spi_rb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 	
 	/* prepare command bytes */
     if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
-        command[0] = spi_mux_target;
-        command[1] = READ_ACCESS | (address & 0x7F);
-        command_size = 2;
+        command[2] = spi_mux_target;
+        command[3] = READ_ACCESS | (address & 0x7F);
+        command_size = 4;
     } else {
-        command[0] = READ_ACCESS | (address & 0x7F);
-        command_size = 1;
+        command[2] = READ_ACCESS | (address & 0x7F);
+        command_size = 3;
     }
+	command[0] = BURST_READ_CMD;
+	command[1] = command_size;
+
 	size_to_do = size;
-	
-	/* determine return code (only the last FastRead is checked) */
-	if (0) {
-		DEBUG_MSG("ERROR: SPI BURST READ FAILURE\n");
-		return LGW_SPI_ERROR;
-	} else {
-		DEBUG_MSG("Note: SPI burst read success\n");
-		return LGW_SPI_SUCCESS;
-	}
+	uint8_t out_buf[size_to_do];
+	uint8_t in_buf[size_to_do];
+        memcpy(out_buf, command, command_size);
+
+        for (i=0; size_to_do > 0; ++i) { 
+                chunk_size = (size_to_do < LGW_BURST_CHUNK) ? size_to_do : LGW_BURST_CHUNK;
+                offset = i * LGW_BURST_CHUNK;
+		ret = handle_cmd(out_buf, in_buf + offset , chunk_size);
+		if (ret != LGW_SPI_SUCCESS){
+			return ret;
+		}
+                size_to_do -= chunk_size; /* subtract the quantity of data already transferred */
+        }
+	data = in_buf + command_size;
+
+	return ret;
 }
 
 /* --- EOF ------------------------------------------------------------------ */
