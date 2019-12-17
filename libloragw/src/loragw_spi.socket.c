@@ -19,7 +19,7 @@
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #if DEBUG_SPI == 1
 	#define DEBUG_MSG(str)				fprintf(stderr, str)
-	#define DEBUG_PRINTF(fmt, args...)	fprintf(stderr,"%s:%d: "fmt, __FUNCTION__, __LINE__, args)
+	#define DEBUG_PRINTF(fmt, args...)		fprintf(stderr,"%s:%d: "fmt, __FUNCTION__, __LINE__, args)
 	#define CHECK_NULL(a)				if(a==NULL){fprintf(stderr,"%s:%d: ERROR: NULL POINTER AS ARGUMENT\n", __FUNCTION__, __LINE__);return LGW_SPI_ERROR;}
 #else
 	#define DEBUG_MSG(str)
@@ -35,7 +35,7 @@
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE CONSTANTS ---------------------------------------------------- */
 
-#define READ_ACCESS		0x00
+#define READ_ACCESS	0x00
 #define WRITE_ACCESS	0x80
 
 /* -------------------------------------------------------------------------- */
@@ -117,18 +117,18 @@ int lgw_spi_w(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, ui
 		DEBUG_MSG("WARNING: SPI address > 127\n");
 	}
 	
-    /* prepare frame to be sent */
-    if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
-        out_buf[3] = spi_mux_target;
-        out_buf[4] = WRITE_ACCESS | (address & 0x7F);
-        out_buf[5] = data;
-        command_size = 6;
-    } else {
-        out_buf[3] = WRITE_ACCESS | (address & 0x7F);
-        out_buf[4] = data;
-        command_size = 5;
-    }
-	
+	/* prepare frame to be sent */
+	if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
+		out_buf[3] = spi_mux_target;
+		out_buf[4] = WRITE_ACCESS | (address & 0x7F);
+		out_buf[5] = data;
+		command_size = 6;
+	} else {
+		out_buf[3] = WRITE_ACCESS | (address & 0x7F);
+		out_buf[4] = data;
+		command_size = 5;
+	}
+
 	out_buf[0] = WRITE_CMD;
 	out_buf[1] = 0;
 	out_buf[2] = command_size & 0xff;
@@ -182,8 +182,7 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 	uint8_t command[6];
 	uint8_t command_size;
 	uint8_t *out_buf = NULL;
-	int size_to_do, buf_size, chunk_size, offset;
-	int i;
+	int size_to_do;
 	int ret;
 	
 	/* check input parameters */
@@ -196,15 +195,15 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 		return LGW_SPI_ERROR;
 	}
 
-    /* prepare command bytes */
-    if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
-        command[3] = spi_mux_target;
-        command[4] = WRITE_ACCESS | (address & 0x7F);
-        command_size = 5;
-    } else {
-        command[3] = WRITE_ACCESS | (address & 0x7F);
-        command_size = 4;
-    }
+	/* prepare command bytes */
+	if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
+		command[3] = spi_mux_target;
+		command[4] = WRITE_ACCESS | (address & 0x7F);
+		command_size = 5;
+	} else {
+		command[3] = WRITE_ACCESS | (address & 0x7F);
+		command_size = 4;
+	}
 	size_to_do = size + command_size; /* add a byte for the address */
 
 	command[0] = BURST_WRITE_CMD;
@@ -220,7 +219,7 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 	uint8_t in_buf[size_to_do];
 
 	memcpy(out_buf, command, command_size);
-        memcpy(out_buf+command_size, data, size);
+	memcpy(out_buf+command_size, data, size);
 		
 	ret = handle_cmd(out_buf, in_buf, size_to_do);
 	if (ret != LGW_SPI_SUCCESS){
@@ -239,10 +238,9 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 int lgw_spi_rb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, uint8_t address, uint8_t *data, uint16_t size) {
 	DEBUG_MSG("lgw_spi_rb\n");
 	DEBUG_PRINTF("total len %d\n", size);
-	uint8_t command[4];
+	uint8_t command[5];
 	uint8_t command_size;
-	int size_to_do, chunk_size, offset;
-	int i;
+	int size_to_do;
 	int ret;
 	
 	/* check input parameters */
@@ -256,14 +254,14 @@ int lgw_spi_rb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 	}
 	
 	/* prepare command bytes */
-    if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
-        command[3] = spi_mux_target;
-        command[4] = READ_ACCESS | (address & 0x7F);
-        command_size = 5;
-    } else {
-        command[3] = READ_ACCESS | (address & 0x7F);
-        command_size = 4;
-    }
+	if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
+		command[3] = spi_mux_target;
+		command[4] = READ_ACCESS | (address & 0x7F);
+		command_size = 5;
+	} else {
+		command[3] = READ_ACCESS | (address & 0x7F);
+		command_size = 4;
+	}
 	size_to_do = size + command_size;
 
 	command[0] = BURST_READ_CMD;
@@ -272,7 +270,7 @@ int lgw_spi_rb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 
 	uint8_t out_buf[size_to_do];
 	uint8_t in_buf[size_to_do];
-        memcpy(out_buf, command, command_size);
+	memcpy(out_buf, command, command_size);
 
 	ret = handle_cmd(out_buf, in_buf, size_to_do);
 	if (ret != LGW_SPI_SUCCESS){
