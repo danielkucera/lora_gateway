@@ -16,7 +16,6 @@
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE MACROS ------------------------------------------------------- */
 
-#define DEBUG_SPI 1 
 #define ARRAY_SIZE(a) (sizeof(a) / sizeof((a)[0]))
 #if DEBUG_SPI == 1
 	#define DEBUG_MSG(str)				fprintf(stderr, str)
@@ -31,7 +30,7 @@
 #define READ_CMD	0x01
 #define WRITE_CMD	0x02
 #define BURST_WRITE_CMD	0x03
-#define BURST_READ_CMD	0x03
+#define BURST_READ_CMD	0x04
 
 /* -------------------------------------------------------------------------- */
 /* --- PRIVATE CONSTANTS ---------------------------------------------------- */
@@ -109,8 +108,8 @@ int handle_cmd(uint8_t *out_buf, uint8_t *in_buf, int len){
 /* Simple write */
 int lgw_spi_w(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, uint8_t address, uint8_t data) {
 	DEBUG_MSG("lgw_spi_w\n");
-	uint8_t in_buf[5];
-	uint8_t out_buf[5];
+	uint8_t in_buf[6];
+	uint8_t out_buf[6];
 	uint8_t command_size;
 	
 	/* check input variables */
@@ -120,18 +119,19 @@ int lgw_spi_w(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, ui
 	
     /* prepare frame to be sent */
     if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
-        out_buf[2] = spi_mux_target;
+        out_buf[3] = spi_mux_target;
+        out_buf[4] = WRITE_ACCESS | (address & 0x7F);
+        out_buf[5] = data;
+        command_size = 6;
+    } else {
         out_buf[3] = WRITE_ACCESS | (address & 0x7F);
         out_buf[4] = data;
         command_size = 5;
-    } else {
-        out_buf[2] = WRITE_ACCESS | (address & 0x7F);
-        out_buf[3] = data;
-        command_size = 4;
     }
 	
 	out_buf[0] = WRITE_CMD;
-	out_buf[1] = command_size;
+	out_buf[1] = 0;
+	out_buf[2] = command_size & 0xff;
 
 	return handle_cmd(out_buf, in_buf, command_size);
 }
@@ -141,8 +141,8 @@ int lgw_spi_w(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, ui
 /* Simple read (using Transfer function) */
 int lgw_spi_r(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, uint8_t address, uint8_t *data) {
 	DEBUG_MSG("lgw_spi_r\n");
-	uint8_t in_buf[5];
-	uint8_t out_buf[5];
+	uint8_t in_buf[6];
+	uint8_t out_buf[6];
 	uint8_t command_size;
 	
 	/* check input variables */
@@ -153,21 +153,22 @@ int lgw_spi_r(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, ui
 	
 	/* prepare frame to be sent */
 	if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
-		out_buf[2] = spi_mux_target;
+		out_buf[3] = spi_mux_target;
+		out_buf[4] = READ_ACCESS | (address & 0x7F);
+		out_buf[5] = 0x00;
+		command_size = 6;
+	} else {
 		out_buf[3] = READ_ACCESS | (address & 0x7F);
 		out_buf[4] = 0x00;
 		command_size = 5;
-	} else {
-		out_buf[2] = READ_ACCESS | (address & 0x7F);
-		out_buf[3] = 0x00;
-		command_size = 4;
 	}
 
 	out_buf[0] = READ_CMD;
-	out_buf[1] = command_size;
+	out_buf[1] = 0;
+	out_buf[2] = command_size & 0xff;
 
 	int ret = handle_cmd(out_buf, in_buf, command_size);
-	*data = in_buf[3];
+	*data = in_buf[4];
 
 	return ret;
 }
@@ -177,7 +178,8 @@ int lgw_spi_r(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, ui
 /* Burst (multiple-byte) write */
 int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, uint8_t address, uint8_t *data, uint16_t size) {
 	DEBUG_MSG("lgw_spi_wb\n");
-	uint8_t command[5];
+	DEBUG_PRINTF("total len %d\n", size);
+	uint8_t command[6];
 	uint8_t command_size;
 	uint8_t *out_buf = NULL;
 	int size_to_do, buf_size, chunk_size, offset;
@@ -196,21 +198,20 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 
     /* prepare command bytes */
     if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
-        command[2] = spi_mux_target;
+        command[3] = spi_mux_target;
+        command[4] = WRITE_ACCESS | (address & 0x7F);
+        command_size = 5;
+    } else {
         command[3] = WRITE_ACCESS | (address & 0x7F);
         command_size = 4;
-    } else {
-        command[2] = WRITE_ACCESS | (address & 0x7F);
-        command_size = 3;
     }
-	command[0] = BURST_WRITE_CMD;
-	command[1] = command_size;
-
 	size_to_do = size + command_size; /* add a byte for the address */
-	
-	/* allocate data buffer */
-	buf_size = (size_to_do < LGW_BURST_CHUNK) ? size_to_do : LGW_BURST_CHUNK;
-	out_buf = malloc(buf_size);
+
+	command[0] = BURST_WRITE_CMD;
+	command[1] = (size_to_do >> 8) & 0xff;
+	command[2] = size_to_do & 0xff;
+
+	out_buf = malloc(size_to_do);
 	if (out_buf == NULL) {
 		DEBUG_MSG("ERROR: MALLOC FAIL\n");
 		return LGW_SPI_ERROR;
@@ -218,23 +219,13 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 
 	uint8_t in_buf[size_to_do];
 
-        for (i=0; size_to_do > 0; ++i) {
-                chunk_size = (size_to_do < LGW_BURST_CHUNK) ? size_to_do : LGW_BURST_CHUNK;
-                if (i == 0) {
-                        /* first chunk, need to prepend the address */
-                        memcpy(out_buf, command, command_size);
-                        memcpy(out_buf+command_size, data, chunk_size-command_size);
-                } else {
-                        /* following chunks, just copy the data */
-                        offset = (i * LGW_BURST_CHUNK) - command_size;
-                        memcpy(out_buf, data + offset, chunk_size);
-                }
-		ret = handle_cmd(out_buf, in_buf, chunk_size);
-		if (ret != LGW_SPI_SUCCESS){
-			return ret;
-		}
-                size_to_do -= chunk_size; /* subtract the quantity of data already transferred */
-        }
+	memcpy(out_buf, command, command_size);
+        memcpy(out_buf+command_size, data, size);
+		
+	ret = handle_cmd(out_buf, in_buf, size_to_do);
+	if (ret != LGW_SPI_SUCCESS){
+		return ret;
+	}
 
 	/* deallocate data buffer */
 	free(out_buf);
@@ -247,6 +238,7 @@ int lgw_spi_wb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 /* Burst (multiple-byte) read */
 int lgw_spi_rb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, uint8_t address, uint8_t *data, uint16_t size) {
 	DEBUG_MSG("lgw_spi_rb\n");
+	DEBUG_PRINTF("total len %d\n", size);
 	uint8_t command[4];
 	uint8_t command_size;
 	int size_to_do, chunk_size, offset;
@@ -265,31 +257,29 @@ int lgw_spi_rb(void *spi_target, uint8_t spi_mux_mode, uint8_t spi_mux_target, u
 	
 	/* prepare command bytes */
     if (spi_mux_mode == LGW_SPI_MUX_MODE1) {
-        command[2] = spi_mux_target;
+        command[3] = spi_mux_target;
+        command[4] = READ_ACCESS | (address & 0x7F);
+        command_size = 5;
+    } else {
         command[3] = READ_ACCESS | (address & 0x7F);
         command_size = 4;
-    } else {
-        command[2] = READ_ACCESS | (address & 0x7F);
-        command_size = 3;
     }
-	command[0] = BURST_READ_CMD;
-	command[1] = command_size;
+	size_to_do = size + command_size;
 
-	size_to_do = size;
+	command[0] = BURST_READ_CMD;
+	command[1] = (size_to_do >> 8) & 0xff;
+	command[2] = size_to_do & 0xff;
+
 	uint8_t out_buf[size_to_do];
 	uint8_t in_buf[size_to_do];
         memcpy(out_buf, command, command_size);
 
-        for (i=0; size_to_do > 0; ++i) { 
-                chunk_size = (size_to_do < LGW_BURST_CHUNK) ? size_to_do : LGW_BURST_CHUNK;
-                offset = i * LGW_BURST_CHUNK;
-		ret = handle_cmd(out_buf, in_buf + offset , chunk_size);
-		if (ret != LGW_SPI_SUCCESS){
-			return ret;
-		}
-                size_to_do -= chunk_size; /* subtract the quantity of data already transferred */
-        }
-	data = in_buf + command_size;
+	ret = handle_cmd(out_buf, in_buf, size_to_do);
+	if (ret != LGW_SPI_SUCCESS){
+		return ret;
+	}
+
+	memcpy(data, in_buf+command_size, size);
 
 	return ret;
 }
