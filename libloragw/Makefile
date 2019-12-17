@@ -44,6 +44,10 @@ else ifeq ($(CFG_SPI),mac)
   CFLAGS      := -O2 -Wall -Wextra -std=c99 -Iinc -I. -I/opt/local/include  -I/usr/local/include -I/opt/local/include/libftdi1 
   CFG_SPI_MSG := FTDI SPI-over-USB bridge on the MAC using libmpsse/libftdi/libusb
   CFG_SPI_OPT := CFG_SPI_FTDI
+else ifeq ($(CFG_SPI),socket)
+  CFLAGS      := -O2 -Wall -Wextra -std=c99 -Iinc -I. -I/opt/local/include  -I/usr/local/include
+  CFG_SPI_MSG := SPI through socket
+  CFG_SPI_OPT := CFG_SPI_SOCKET
 else
   $(error No SPI physical layer selected, check ../target.cfg file.)
 endif
@@ -57,6 +61,8 @@ ifeq ($(CFG_SPI),native)
   LIBS := -lloragw -lrt -lm
 else ifeq ($(CFG_SPI),ftdi)
   LIBS := -lloragw -lrt -lmpsse -lm
+else ifeq ($(CFG_SPI),socket)
+  LIBS := -lloragw -lrt -lm
 else ifeq ($(CFG_SPI),mac)
   LIBS := -lloragw -lmpsse -lm
 endif
@@ -112,6 +118,9 @@ $(OBJDIR)/loragw_spi.o: src/loragw_spi.native.c inc/loragw_spi.h inc/config.h | 
 	$(CC) -c $(CFLAGS) $< -o $@
 else ifeq ($(CFG_SPI),ftdi)
 $(OBJDIR)/loragw_spi.o: src/loragw_spi.ftdi.c inc/loragw_spi.h inc/config.h | $(OBJDIR)
+	$(CC) -c $(CFLAGS) $< -o $@
+else ifeq ($(CFG_SPI),socket)
+$(OBJDIR)/loragw_spi.o: src/loragw_spi.socket.c inc/loragw_spi.h inc/config.h | $(OBJDIR)
 	$(CC) -c $(CFLAGS) $< -o $@
 else ifeq ($(CFG_SPI),mac)
 $(OBJDIR)/loragw_spi.o: src/loragw_spi.ftdi.c inc/loragw_spi.h inc/config.h | $(OBJDIR)
